@@ -881,7 +881,7 @@ export class EntityManager<Driver extends IDatabaseDriver = IDatabaseDriver> {
     if (Utils.isEntity(data)) {
       entity = data as Entity;
 
-      if (helper(entity).__managed && helper(entity).__em === em) {
+      if (helper(entity).__managed && helper(entity).__em === em && !this.config.get('upsertManaged')) {
         em.entityFactory.mergeData(meta, entity, data, { initialized: true });
         return entity;
       }
@@ -892,7 +892,7 @@ export class EntityManager<Driver extends IDatabaseDriver = IDatabaseDriver> {
       data = Utils.copy(QueryHelper.processParams(data));
       where = Utils.extractPK(data, meta) as FilterQuery<Entity>;
 
-      if (where) {
+      if (where && !this.config.get('upsertManaged')) {
         const exists = em.unitOfWork.getById<Entity>(entityName, where as Primary<Entity>, options.schema);
 
         if (exists) {
@@ -1045,7 +1045,7 @@ export class EntityManager<Driver extends IDatabaseDriver = IDatabaseDriver> {
       if (Utils.isEntity(row)) {
         const entity = row as Entity;
 
-        if (helper(entity).__managed && helper(entity).__em === em) {
+        if (helper(entity).__managed && helper(entity).__em === em && !this.config.get('upsertManaged')) {
           em.entityFactory.mergeData(meta, entity, row, { initialized: true });
           entities.set(entity, row);
           entitiesByData.set(row, entity);
@@ -1058,7 +1058,7 @@ export class EntityManager<Driver extends IDatabaseDriver = IDatabaseDriver> {
         row = data[i] = Utils.copy(QueryHelper.processParams(row));
         where = Utils.extractPK(row, meta) as FilterQuery<Entity>;
 
-        if (where) {
+        if (where && !this.config.get('upsertManaged')) {
           const exists = em.unitOfWork.getById<Entity>(entityName, where as Primary<Entity>, options.schema);
 
           if (exists) {
@@ -1451,7 +1451,7 @@ export class EntityManager<Driver extends IDatabaseDriver = IDatabaseDriver> {
 
     entityName = Utils.className(entityName);
     data = QueryHelper.processObjectParams(data);
-    where = await em.processWhere(entityName, where, options, 'update');
+    where = await em.processWhere(entityName, where, { ...options, convertCustomTypes: false }, 'update');
     em.validator.validateParams(data, 'update data');
     em.validator.validateParams(where, 'update condition');
     const res = await em.driver.nativeUpdate(entityName, where, data, { ctx: em.transactionContext, ...options });

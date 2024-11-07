@@ -174,13 +174,13 @@ export class MetadataDiscovery {
     });
   }
 
-  private findEntities(preferTsNode: boolean, sync: true): EntityMetadata[];
-  private findEntities(preferTsNode: boolean, sync?: false): Promise<EntityMetadata[]>;
-  private findEntities(preferTsNode: boolean, sync = false): EntityMetadata[] | Promise<EntityMetadata[]> {
+  private findEntities(preferTs: boolean, sync: true): EntityMetadata[];
+  private findEntities(preferTs: boolean, sync?: false): Promise<EntityMetadata[]>;
+  private findEntities(preferTs: boolean, sync = false): EntityMetadata[] | Promise<EntityMetadata[]> {
     this.discovered.length = 0;
 
     const options = this.config.get('discovery');
-    const key = (preferTsNode && this.config.get('tsNode', Utils.detectTsNode()) && this.config.get('entitiesTs').length > 0) ? 'entitiesTs' : 'entities';
+    const key = (preferTs && this.config.get('preferTs', Utils.detectTsNode()) && this.config.get('entitiesTs').length > 0) ? 'entitiesTs' : 'entities';
     const paths = this.config.get(key).filter(item => Utils.isString(item)) as string[];
     const refs = this.config.get(key).filter(item => !Utils.isString(item)) as Constructor<AnyEntity>[];
 
@@ -474,6 +474,26 @@ export class MetadataDiscovery {
     }
   }
 
+  private initOwnColumns(meta: EntityMetadata): void {
+    meta.sync();
+
+    for (const prop of meta.props) {
+      if (!prop.joinColumns || prop.ownColumns) {
+        continue;
+      }
+
+      if (prop.joinColumns.length > 1) {
+        prop.ownColumns = prop.joinColumns.filter(col => {
+          return !meta.props.find(p => p.name !== prop.name && (!p.fieldNames || p.fieldNames.includes(col)));
+        });
+      }
+
+      if (!prop.ownColumns || prop.ownColumns.length === 0) {
+        prop.ownColumns = prop.joinColumns;
+      }
+    }
+  }
+
   private initFieldName(prop: EntityProperty, object = false): void {
     if (prop.fieldNames && prop.fieldNames.length > 0) {
       return;
@@ -604,6 +624,7 @@ export class MetadataDiscovery {
       this.initRelation(prop);
     }
 
+    this.initOwnColumns(meta);
     meta.simplePK = pks.length === 1 && pks[0].kind === ReferenceKind.SCALAR && !pks[0].customType && pks[0].runtimeType !== 'Date';
     meta.serializedPrimaryKey = this.platform.getSerializedPrimaryKeyField(meta.primaryKeys[0]);
     const serializedPKProp = meta.properties[meta.serializedPrimaryKey];

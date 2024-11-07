@@ -604,14 +604,16 @@ export class QueryBuilderHelper {
       const singleTuple = !value[op].every((v: unknown) => Array.isArray(v));
 
       if (!this.platform.allowsComparingTuples()) {
+        const mapped = fields.map(f => this.mapper(f, type));
+
         if (op === '$in') {
           const conds = value[op].map(() => {
-            return `(${fields.map(field => `${this.platform.quoteIdentifier(field)} = ?`).join(' and ')})`;
+            return `(${mapped.map(field => `${this.platform.quoteIdentifier(field)} = ?`).join(' and ')})`;
           });
           return void qb[m](this.knex.raw(`(${conds.join(' or ')})`, Utils.flatten(value[op])));
         }
 
-        return void qb[m](this.knex.raw(`${fields.map(field => `${this.platform.quoteIdentifier(field)} = ?`).join(' and ')}`, Utils.flatten(value[op])));
+        return void qb[m](this.knex.raw(`${mapped.map(field => `${this.platform.quoteIdentifier(field)} = ?`).join(' and ')}`, Utils.flatten(value[op])));
       }
 
       if (singleTuple) {
@@ -745,7 +747,7 @@ export class QueryBuilderHelper {
     }
 
     if (type === QueryType.UPDATE) {
-      const returningProps = meta.hydrateProps.filter(prop => Utils.isRawSql(data[prop.name]));
+      const returningProps = meta.hydrateProps.filter(prop => prop.fieldNames && Utils.isRawSql(data[prop.fieldNames[0]]));
 
       if (returningProps.length > 0) {
         qb.returning(returningProps.flatMap(prop => {
@@ -932,6 +934,19 @@ export class QueryBuilderHelper {
 
   isTableNameAliasRequired(type?: QueryType): boolean {
     return [QueryType.SELECT, QueryType.COUNT].includes(type ?? QueryType.SELECT);
+  }
+
+  // workaround for https://github.com/knex/knex/issues/5257
+  processOnConflictCondition(cond: QBFilterQuery, schema?: string): QBFilterQuery {
+    const meta = this.metadata.get(this.entityName);
+    const tableName = this.driver.getTableName(meta, { schema }, false);
+
+    for (const key of Object.keys(cond)) {
+      const mapped = this.mapper(key, QueryType.INSERT);
+      Utils.renameKey(cond, key, tableName + '.' + mapped);
+    }
+
+    return cond;
   }
 
 }

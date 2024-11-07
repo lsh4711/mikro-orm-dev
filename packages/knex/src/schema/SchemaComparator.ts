@@ -447,6 +447,10 @@ export class SchemaComparator {
       return true;
     }
 
+    if (key1.constraintName !== key2.constraintName) {
+      return true;
+    }
+
     if (key1.referencedTableName !== key2.referencedTableName) {
       return true;
     }

@@ -201,7 +201,11 @@ export interface IWrappedEntity<Entity extends object> {
   toObject<Ignored extends EntityKey<Entity>>(ignoreFields: Ignored[]): Omit<EntityDTO<Entity>, Ignored>;
   toJSON(...args: any[]): EntityDTO<Entity>;
   toPOJO(): EntityDTO<Entity>;
-  serialize<Hint extends string = never, Exclude extends string = never>(options?: SerializeOptions<Entity, Hint, Exclude>): EntityDTO<Loaded<Entity, Hint>>;
+  serialize<
+    Naked extends FromEntityType<Entity> = FromEntityType<Entity>,
+    Hint extends string = never,
+    Exclude extends string = never,
+  >(options?: SerializeOptions<Naked, Hint, Exclude>): EntityDTO<Loaded<Naked, Hint>>;
   setSerializationContext<
     Hint extends string = never,
     Fields extends string = '*',
@@ -502,6 +506,7 @@ export interface EntityProperty<Owner = any, Target = any> {
   pivotTable: string;
   pivotEntity: string;
   joinColumns: string[];
+  ownColumns: string[];
   inverseJoinColumns: string[];
   referencedColumnNames: string[];
   referencedTableName: string;
@@ -916,10 +921,22 @@ export interface IMigrator {
   down(options?: string | string[] | MigrateOptions): Promise<UmzugMigration[]>;
 
   /**
+   * Registers event handler.
+   */
+  on(event: MigratorEvent, listener: (event: UmzugMigration) => MaybePromise<void>): IMigrator;
+
+  /**
+   * Removes event handler.
+   */
+  off(event: MigratorEvent, listener: (event: UmzugMigration) => MaybePromise<void>): IMigrator;
+
+  /**
    * @internal
    */
   getStorage(): IMigratorStorage;
 }
+
+export type MigratorEvent = 'migrating' | 'migrated' | 'reverting' | 'reverted';
 
 export interface MigrationDiff {
   up: string[];

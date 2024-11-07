@@ -527,7 +527,7 @@ export class QueryBuilder<
     }
 
     if (this._onConflict) {
-      this._onConflict[this._onConflict.length - 1].where = this._cond;
+      this._onConflict[this._onConflict.length - 1].where = this.helper.processOnConflictCondition(this._cond, this._schema);
       this._cond = {};
     }
 
@@ -573,16 +573,31 @@ export class QueryBuilder<
     return this as SelectQueryBuilder<Entity, RootAlias, Hint, Context>;
   }
 
-  having(cond: QBFilterQuery | string = {}, params?: any[]): SelectQueryBuilder<Entity, RootAlias, Hint, Context> {
+  having(cond: QBFilterQuery | string = {}, params?: any[], operator?: keyof typeof GroupOperator): SelectQueryBuilder<Entity, RootAlias, Hint, Context> {
     this.ensureNotFinalized();
 
     if (Utils.isString(cond)) {
       cond = { [raw(`(${cond})`, params)]: [] };
     }
 
-    this._having = CriteriaNodeFactory.createNode<Entity>(this.metadata, this.mainAlias.entityName, cond).process(this);
+    cond = CriteriaNodeFactory.createNode<Entity>(this.metadata, this.mainAlias.entityName, cond).process(this);
+
+    if (!this._having || !operator) {
+      this._having = cond as QBFilterQuery<Entity>;
+    } else {
+      const cond1 = [this._having, cond];
+      this._having = { [operator]: cond1 };
+    }
 
     return this as SelectQueryBuilder<Entity, RootAlias, Hint, Context>;
+  }
+
+  andHaving(cond?: QBFilterQuery | string, params?: any[]): SelectQueryBuilder<Entity, RootAlias, Hint, Context> {
+    return this.having(cond, params, '$and');
+  }
+
+  orHaving(cond?: QBFilterQuery | string, params?: any[]): SelectQueryBuilder<Entity, RootAlias, Hint, Context> {
+    return this.having(cond, params, '$or');
   }
 
   onConflict(fields: Field<Entity> | Field<Entity>[] = []): InsertQueryBuilder<Entity> {
@@ -1007,7 +1022,6 @@ export class QueryBuilder<
         const value = Reference.unwrapReference(entity[propName as never] as object);
 
         if (Utils.isEntity<U>(value)) {
-          helper(value).populated();
           propagatePopulateHint<any>(value, hint.children ?? []);
         } else if (Utils.isCollection(value)) {
           value.populated();
@@ -1452,7 +1466,7 @@ export class QueryBuilder<
         qb.select(this.prepareFields(this._fields!));
 
         if (this._distinctOn) {
-          qb.distinctOn(this._distinctOn as string[]);
+          qb.distinctOn(this.prepareFields(this._distinctOn) as string[]);
         } else if (this.flags.has(QueryFlag.DISTINCT)) {
           qb.distinct();
         }
@@ -1470,6 +1484,7 @@ export class QueryBuilder<
         break;
       case QueryType.UPDATE:
         qb.update(this._data);
+        this.helper.processJoins(qb, this._joins, joinSchema);
         this.helper.updateVersionProperty(qb, this._data);
         break;
       case QueryType.DELETE:
@@ -1796,6 +1811,7 @@ export class QueryBuilder<
     (subSubQuery as Dictionary).__raw = true; // tag it as there is now way to check via `instanceof`
     const method = this.flags.has(QueryFlag.UPDATE_SUB_QUERY) ? 'update' : 'delete';
     this._cond = {}; // otherwise we would trigger validation error
+    this._joins = {}; // included in the subquery
 
     this[method](this._data as EntityData<Entity>).where({
       [Utils.getPrimaryKeyHash(meta.primaryKeys)]: { $in: subSubQuery },

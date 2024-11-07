@@ -247,6 +247,37 @@ MikroORM.init({
 });
 ```
 
+### `onQuery` hook and observability
+
+Sometimes you might want to alter the generated queries. One use case for that might be adding contextual query hints to allow observability. Before a more native approach is added to the ORM, you can use the `onQuery` hook to modify all the queries by hand. The hook will be fired for every query before its execution.
+
+```ts
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const ctx = new AsyncLocalStorage();
+
+// provide the necessary data to the store in some middleware
+app.use((req, res, next) => {
+  const store = { endpoint: req.url };
+  ctx.run(store, next);
+});
+
+MikroORM.init({
+  onQuery: (sql: string, params: unknown[]) => {
+    const store = ctx.getStore();
+
+    if (!store) {
+      return sql;
+    }
+
+    // your function that generates the necessary query hint
+    const hint = createQueryHint(store);
+
+    return sql + hint;
+  },
+});
+```
+
 ## Naming Strategy
 
 When mapping your entities to database tables and columns, their names will be defined by naming strategy. There are 3 basic naming strategies you can choose from:
@@ -550,6 +581,18 @@ MikroORM.init({
 });
 ```
 
+## Deprecation warnings
+
+By default, doing something that is deprecated will result in a deprecation warning being logged. The default logger will in turn show it on the console.
+
+You can ignore all or only specific deprecation warnings. See [Logging's section on deprecation warnings](./logging.md#deprecation-warnings) for details.
+
+The full list of deprecation errors:
+
+| label | message                                                                                                                                                                                                                                                                            |
+|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| D001  | Path for config file was inferred from the command line arguments. Instead, you should set the `MIKRO_ORM_CLI_CONFIG` environment variable to specify the path, or if you really must use the command line arguments, import the config manually based on them, and pass it to init. |
+
 ## Using environment variables
 
 Since v4.5 it is possible to set most of the ORM options via environment variables. By default `.env` file from the root directory is loaded - it is also possible to set full path to the env file you want to use via `MIKRO_ORM_ENV` environment variable.
@@ -576,6 +619,7 @@ Full list of supported options:
 
 | env variable                                                | config key                               |
 |-------------------------------------------------------------|------------------------------------------|
+| `MIKRO_ORM_CONTEXT_NAME`                                    | `contextName`                            |
 | `MIKRO_ORM_BASE_DIR`                                        | `baseDir`                                |
 | `MIKRO_ORM_TYPE`                                            | `type`                                   |
 | `MIKRO_ORM_ENTITIES`                                        | `entities`                               |
@@ -625,6 +669,19 @@ Full list of supported options:
 | `MIKRO_ORM_SEEDER_GLOB`                                     | `seeder.glob`                            |
 | `MIKRO_ORM_SEEDER_EMIT`                                     | `seeder.emit`                            |
 | `MIKRO_ORM_SEEDER_DEFAULT_SEEDER`                           | `seeder.defaultSeeder`                   |
+
+Note that setting `MIKRO_ORM_CONTEXT_NAME` without also setting another configuration environment variable from the table above has a slightly different effect. When combined with other environment variables, the final configuration object is considered to have this `contextName`. Without other environment variables, it is a value of `contextName` to search within the config file. The final config object is picked based on this value.
+
+For example, assume no `.env` file is present (or is present, but sets nothing from the table above) and you run:
+
+```sh
+$ MIKRO_ORM_CONTEXT_NAME=example1 \
+  node ./dist/index.js
+```
+
+This will look for a config file in the standard paths, and will expect the config file to be able to provide a config with `contextName` set to "example1".
+
+If you also set other environment variables, MikroORM will still search for a config file and try to a find a config with this `contextName`, but if it can't find one, it will create a config based on this `contextName` and the rest of the environment variables.
 
 There are also env vars you can use to control the CLI settings (those you can set in your `package.json`):
 

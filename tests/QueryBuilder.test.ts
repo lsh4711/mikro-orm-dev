@@ -925,16 +925,18 @@ describe('QueryBuilder', () => {
       .leftJoin('t.books', 'b')
       .where('b.title = ? or b.title = ?', ['test 123', 'lol 321'])
       .groupBy(['b.uuid', 't.id'])
-      .having('tags > ?', [0]);
+      .having('tags > ?', [0])
+      .andHaving('tags < ?', [1])
+      .orHaving('tags <> ?', [2]);
     const query = 'select `b`.*, `t`.*, count(t.id) as tags, `b`.`title` as book_title ' +
       'from `book_tag2` as `t` ' +
       'left join `book2_tags` as `e1` on `t`.`id` = `e1`.`book_tag2_id` ' +
       'left join `book2` as `b` on `e1`.`book2_uuid_pk` = `b`.`uuid_pk` ' +
       'where (b.title = ? or b.title = ?) ' +
       'group by `b`.`uuid_pk`, `t`.`id` ' +
-      'having (tags > ?)';
+      'having (((tags > ?) and (tags < ?)) or (tags <> ?))';
     expect(qb.getQuery()).toEqual(query);
-    expect(qb.getParams()).toEqual(['test 123', 'lol 321', 0]);
+    expect(qb.getParams()).toEqual(['test 123', 'lol 321', 0, 1, 2]);
   });
 
   test('select with group by and having with object', async () => {
@@ -1558,6 +1560,18 @@ describe('QueryBuilder', () => {
       'select distinct `e0`.`bar_id`, `e0`.`baz_id` from `foo_param2` as `e0` left join `foo_bar2` as `e1` on `e0`.`bar_id` = `e1`.`id` where `e1`.`baz_id` = ?' +
       ') as `e0`)');
     expect(qb.getParams()).toEqual(['test 123', 123]);
+  });
+
+  test('update query with joins', async () => {
+    const qb = orm.em.createQueryBuilder(Publisher2, 'p');
+    qb.update({ name: 'test 123', type: PublisherType.GLOBAL })
+      .join('p.books', 'b', { title: 'foo' })
+      .where({ 'b.author': 123 });
+    expect(qb.getQuery()).toEqual('update `publisher2` as `p` ' +
+      'inner join `book2` as `b` on `p`.`id` = `b`.`publisher_id` and `b`.`title` = ? ' +
+      'set `name` = ?, `type` = ? ' +
+      'where `b`.`author_id` = ?');
+    expect(qb.getParams()).toEqual(['foo', 'test 123', PublisherType.GLOBAL, 123]);
   });
 
   test('trying to call qb.update/delete() after qb.where() will throw', async () => {
@@ -2776,7 +2790,7 @@ describe('QueryBuilder', () => {
       })
       .where({ updatedAt: { $lt: timestamp } });
 
-    expect(qb10.getQuery()).toEqual('insert into "author2" ("created_at", "email", "name", "updated_at") values ($1, $2, $3, $4) on conflict ("email") do update set "name" = $5,"updated_at" = $6 where "updated_at" < $7 returning "id", "created_at", "updated_at", "age", "terms_accepted"');
+    expect(qb10.getQuery()).toEqual('insert into "author2" ("created_at", "email", "name", "updated_at") values ($1, $2, $3, $4) on conflict ("email") do update set "name" = $5,"updated_at" = $6 where "author2"."updated_at" < $7 returning "id", "created_at", "updated_at", "age", "terms_accepted"');
     expect(qb10.getParams()).toEqual([timestamp, 'ignore@example.com', 'John Doe', timestamp, 'John Doe', timestamp, timestamp]);
 
     const qb11 = pg.em.createQueryBuilder(Book2).where({ meta: { foo: 123 } });

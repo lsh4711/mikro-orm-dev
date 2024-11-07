@@ -33,7 +33,14 @@ export class CLIConfigurator {
       .example('$0 schema:update --run', 'Runs schema synchronization')
       .option('config', {
         type: 'string',
+        array: true,
         desc: `Set path to the ORM configuration file`,
+      })
+      .option('contextName', {
+        alias: 'context',
+        type: 'string',
+        desc: 'Set name of config to load out of the ORM configuration file. Used when config file exports an array or a function',
+        default: process.env.MIKRO_ORM_CONTEXT_NAME ?? 'default',
       })
       .alias('v', 'version')
       .alias('h', 'help')
@@ -47,10 +54,10 @@ export class CLIConfigurator {
     const version = Utils.getORMVersion();
 
     if (settings.useTsNode !== false) {
-      const tsNode = ConfigurationLoader.registerTsNode(settings.tsConfigPath);
+      const preferTs = ConfigurationLoader.registerTsNode(settings.tsConfigPath);
 
       /* istanbul ignore if */
-      if (!tsNode) {
+      if (!preferTs) {
         process.env.MIKRO_ORM_CLI_USE_TS_NODE ??= '0';
       }
     }

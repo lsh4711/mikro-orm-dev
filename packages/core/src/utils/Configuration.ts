@@ -57,9 +57,10 @@ export class Configuration<D extends IDatabaseDriver = IDatabaseDriver, EM exten
       requireEntitiesArray: false,
       checkDuplicateTableNames: true,
       checkDuplicateFieldNames: true,
+      checkDuplicateEntities: true,
+      checkNonPersistentCompositeProps: true,
       alwaysAnalyseProperties: true,
       disableDynamicFileAccess: false,
-      checkDuplicateEntities: true,
       inferDefaultValues: true,
     },
     strict: false,
@@ -81,6 +82,7 @@ export class Configuration<D extends IDatabaseDriver = IDatabaseDriver, EM exten
     populateWhere: PopulateHint.ALL,
     connect: true,
     ignoreUndefinedInQuery: false,
+    onQuery: sql => sql,
     autoJoinOneToOneOwner: true,
     autoJoinRefsForFilters: true,
     propagationOnPrototype: true,
@@ -95,12 +97,14 @@ export class Configuration<D extends IDatabaseDriver = IDatabaseDriver, EM exten
       mergeEmbeddedProperties: true,
     },
     persistOnCreate: true,
+    upsertManaged: true,
     forceEntityConstructor: false,
     forceUndefined: false,
     ensureDatabase: true,
     ensureIndexes: false,
     batchSize: 300,
     debug: false,
+    ignoreDeprecations: false,
     verbose: false,
     driverOptions: {},
     migrations: {
@@ -175,6 +179,7 @@ export class Configuration<D extends IDatabaseDriver = IDatabaseDriver, EM exten
 
     this.options = Utils.mergeConfig({}, Configuration.DEFAULTS, options);
     this.options.baseDir = Utils.absolutePath(this.options.baseDir);
+    this.options.preferTs ??= options.tsNode;
 
     if (validate) {
       this.validateOptions();
@@ -183,6 +188,7 @@ export class Configuration<D extends IDatabaseDriver = IDatabaseDriver, EM exten
     this.options.loggerFactory ??= DefaultLogger.create;
     this.logger = this.options.loggerFactory({
       debugMode: this.options.debug,
+      ignoreDeprecations: this.options.ignoreDeprecations,
       usesReplicas: (this.options.replicas?.length ?? 0) > 0,
       highlighter: this.options.highlighter,
       writer: this.options.logger,
@@ -401,6 +407,7 @@ export class Configuration<D extends IDatabaseDriver = IDatabaseDriver, EM exten
 
   private sync(): void {
     process.env.MIKRO_ORM_COLORS = '' + this.options.colors;
+    this.options.tsNode = this.options.preferTs;
     this.logger.setDebugMode(this.options.debug);
   }
 
@@ -539,11 +546,12 @@ export interface MetadataDiscoveryOptions {
   requireEntitiesArray?: boolean;
   checkDuplicateTableNames?: boolean;
   checkDuplicateFieldNames?: boolean;
+  checkDuplicateEntities?: boolean;
+  checkNonPersistentCompositeProps?: boolean;
   alwaysAnalyseProperties?: boolean;
   disableDynamicFileAccess?: boolean;
   inferDefaultValues?: boolean;
   getMappedType?: (type: string, platform: Platform) => Type<unknown> | undefined;
-  checkDuplicateEntities?: boolean;
   onMetadata?: (meta: EntityMetadata, platform: Platform) => MaybePromise<void>;
   afterDiscovered?: (storage: MetadataStorage, platform: Platform) => MaybePromise<void>;
   tsConfigPath?: string;
@@ -563,6 +571,7 @@ export interface MikroORMOptions<D extends IDatabaseDriver = IDatabaseDriver, EM
   connect: boolean;
   verbose: boolean;
   ignoreUndefinedInQuery?: boolean;
+  onQuery: (sql: string, params: unknown[]) => string;
   autoJoinOneToOneOwner: boolean;
   autoJoinRefsForFilters: boolean;
   propagationOnPrototype: boolean;
@@ -574,6 +583,7 @@ export interface MikroORMOptions<D extends IDatabaseDriver = IDatabaseDriver, EM
   };
   assign: AssignOptions<boolean>;
   persistOnCreate: boolean;
+  upsertManaged: boolean;
   forceEntityConstructor: boolean | (Constructor<AnyEntity> | string)[];
   forceUndefined: boolean;
   forceUtcTimezone?: boolean;
@@ -604,7 +614,15 @@ export interface MikroORMOptions<D extends IDatabaseDriver = IDatabaseDriver, EM
   findOneOrFailHandler: (entityName: string, where: Dictionary | IPrimaryKey) => Error;
   findExactlyOneOrFailHandler: (entityName: string, where: Dictionary | IPrimaryKey) => Error;
   debug: boolean | LoggerNamespace[];
+  ignoreDeprecations: boolean | string[];
   highlighter: Highlighter;
+  /**
+   * Using this option, you can force the ORM to use the TS options regardless of whether the TypeScript support
+   * is detected or not. This effectively means using `entitiesTs` for discovery and `pathTs` for migrations and
+   * seeders. Should be used only for tests and stay disabled for production builds.
+   */
+  preferTs?: boolean;
+  /** @deprecated use `preferTs` instead */
   tsNode?: boolean;
   baseDir: string;
   migrations: MigrationsOptions;

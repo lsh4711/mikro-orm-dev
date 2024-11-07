@@ -14,6 +14,8 @@ import {
   type Transaction,
   type Configuration,
   type MigrationsOptions,
+  type MigratorEvent,
+  type MaybePromise,
 } from '@mikro-orm/core';
 import {
   DatabaseSchema,
@@ -49,7 +51,7 @@ export class Migrator implements IMigrator {
     this.options = this.config.get('migrations');
 
     /* istanbul ignore next */
-    const key = (this.config.get('tsNode', Utils.detectTsNode()) && this.options.pathTs) ? 'pathTs' : 'path';
+    const key = (this.config.get('preferTs', Utils.detectTsNode()) && this.options.pathTs) ? 'pathTs' : 'path';
     this.absolutePath = Utils.absolutePath(this.options[key]!, this.config.get('baseDir'));
     // for snapshots, we always want to use the path based on `emit` option, regardless of whether we run in ts-node context
     /* istanbul ignore next */
@@ -115,6 +117,22 @@ export class Migrator implements IMigrator {
       code: migration[0],
       diff,
     };
+  }
+
+  /**
+   * @inheritDoc
+   */
+  on(eventName: MigratorEvent, listener: (event: UmzugMigration) => MaybePromise<void>): this {
+    this.umzug.on(eventName, listener);
+    return this;
+  }
+
+  /**
+   * @inheritDoc
+   */
+  off(eventName: MigratorEvent, listener: (event: UmzugMigration) => MaybePromise<void>): this {
+    this.umzug.off(eventName, listener);
+    return this;
   }
 
   private createUmzug(): void {

@@ -1,22 +1,15 @@
 import { SqlHighlighter } from '@mikro-orm/sql-highlighter';
-import { Configuration, ConfigurationLoader, MikroORM, Utils } from '@mikro-orm/core';
+import { Configuration, ConfigurationLoader, MikroORM, Options, Utils } from '@mikro-orm/core';
 import { CLIConfigurator, CLIHelper } from '@mikro-orm/cli';
 import { SchemaCommandFactory } from '../../../packages/cli/src/commands/SchemaCommandFactory';
-import { MongoDriver } from '@mikro-orm/mongodb';
+import { MongoDriver, defineConfig } from '@mikro-orm/mongodb';
 import { SqliteDriver } from '@mikro-orm/sqlite';
 import { resolve } from 'node:path';
 import type * as pathModule from 'node:path';
-import type * as mikroOrmCoreModule from '@mikro-orm/core';
 
 declare module global {
-  let normalizedCwd: string;
   let resolvedCwd: string;
 }
-
-jest.mock((global.normalizedCwd = jest.requireActual<typeof mikroOrmCoreModule>('@mikro-orm/core').Utils.normalizePath(process.cwd())) + '/mikro-orm.config.js', () => ({ driver: MongoDriver, dbName: 'foo_bar', entities: ['tests/foo'] }), { virtual: true });
-jest.mock(global.normalizedCwd + '/mikro-orm.config.ts', () => ({ driver: MongoDriver, dbName: 'foo_bar', entities: ['tests/foo'] }), { virtual: true });
-jest.mock(global.normalizedCwd + '/mikro-orm-async.config.js', () => (Promise.resolve({ driver: MongoDriver, dbName: 'foo_bar', entities: ['tests/foo'] })), { virtual: true });
-jest.mock(global.normalizedCwd + '/mikro-orm-async-catch.config.js', () => (Promise.reject('FooError')), { virtual: true });
 
 const pkg = { 'mikro-orm': {} } as any;
 jest.mock(
@@ -47,9 +40,10 @@ describe('CLIHelper', () => {
   let readJSONMock: jest.SpyInstance;
   let dynamicImportMock: jest.SpyInstance;
   let requireFromMock: jest.SpyInstance;
+  const loggerMessages: string[] = [];
 
   beforeEach(() => {
-    const config = { driver: MongoDriver, dbName: 'foo_bar', entities: ['tests/foo'] };
+    const config = { driver: MongoDriver, dbName: 'foo_bar', entities: ['tests/foo'] } satisfies Options<MongoDriver>;
     pathExistsMock = jest.spyOn(require('fs-extra'), 'pathExistsSync');
     const resolve = (path: any) => {
       switch (path.substring(path.lastIndexOf('/') + 1)) {
@@ -58,6 +52,47 @@ describe('CLIHelper', () => {
         case 'mikro-orm.config.ts': return config;
         case 'mikro-orm-async.config.js': return Promise.resolve(config);
         case 'mikro-orm-async-catch.config.js': return Promise.reject('FooError');
+        case 'mikro-orm-factory.config.js': return (contextName: string) => (contextName === 'boom' ? undefined : Object.assign(
+          {},
+          config,
+          {
+            dbName: `tenant_${contextName}`,
+            logger: message => {
+              loggerMessages.push(message);
+            },
+          } satisfies Options<MongoDriver>,
+        ));
+        case 'mikro-orm-array.config.js': return [
+          config,
+          Object.assign(
+            {},
+            config,
+            { contextName: 'cfg2', user: 'user2' } satisfies Options<MongoDriver>,
+          ),
+        ];
+        case 'mikro-orm-array-invalid.config.js': return [
+          config,
+          config,
+        ];
+        case 'mikro-orm-factory-array.config.js': return [
+          config,
+          Object.assign(
+            {},
+            config,
+            { contextName: 'cfg2', user: 'user2' } satisfies Options<MongoDriver>,
+          ),
+          (contextName: string) => ((contextName === 'boom' || contextName === 'unknown') ? undefined : Object.assign(
+            {},
+            config,
+            { dbName: `tenant_${contextName}` } satisfies Options<MongoDriver>,
+          )),
+          async (contextName: string) => (contextName === 'unknown' ? undefined : Object.assign(
+            {},
+            config,
+            { dbName: `tenant_${contextName}`, user: 'user2' } satisfies Options<MongoDriver>,
+          )),
+        ];
+        case 'mikro-orm-invalid.config.js': return 'Not a config';
         default: return undefined;
       }
     };
@@ -76,6 +111,7 @@ describe('CLIHelper', () => {
     readJSONMock.mockRestore();
     dynamicImportMock.mockRestore();
     requireFromMock.mockRestore();
+    loggerMessages.length = 0;
   });
 
   test('configures yargs instance', async () => {
@@ -273,6 +309,101 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
     delete pkg['mikro-orm'].configPaths;
   });
 
+  test('gets ORM configuration [from package.json] by contextName from factory', async () => {
+    pathExistsMock.mockReturnValue(true);
+    pkg['mikro-orm'].configPaths = [`${Utils.normalizePath(process.cwd())}/mikro-orm-factory.config.js`];
+
+    const conf = await CLIHelper.getConfiguration();
+    expect(conf).toBeInstanceOf(Configuration);
+    expect(conf.get('dbName')).toBe('tenant_default');
+    expect(conf.get('entities')).toEqual(['tests/foo']);
+
+    const conf2 = await CLIHelper.getConfiguration('example1');
+    expect(conf2).toBeInstanceOf(Configuration);
+    expect(conf2.get('dbName')).toBe('tenant_example1');
+    expect(conf2.get('entities')).toEqual(['tests/foo']);
+
+    await expect(async () => {
+      return await CLIHelper.getConfiguration('boom');
+    }).rejects.toThrowError(/^MikroORM config 'boom' was not what the function exported from/);
+
+    delete pkg['mikro-orm'].configPaths;
+  });
+
+  test('gets ORM configuration [from package.json] by contextName from array', async () => {
+    pathExistsMock.mockReturnValue(true);
+    pkg['mikro-orm'].configPaths = [`${Utils.normalizePath(process.cwd())}/mikro-orm-array.config.js`];
+
+    const conf = await CLIHelper.getConfiguration();
+    expect(conf).toBeInstanceOf(Configuration);
+    expect(conf.get('dbName')).toBe('foo_bar');
+    expect(conf.get('user')).toBeUndefined();
+    expect(conf.get('entities')).toEqual(['tests/foo']);
+
+    const conf2 = await CLIHelper.getConfiguration('cfg2');
+    expect(conf2).toBeInstanceOf(Configuration);
+    expect(conf2.get('dbName')).toBe('foo_bar');
+    expect(conf2.get('user')).toBe('user2');
+    expect(conf2.get('entities')).toEqual(['tests/foo']);
+
+    await expect(async () => {
+      return await CLIHelper.getConfiguration('unknown');
+    }).rejects.toThrowError(/^MikroORM config 'unknown' was not found within the config file/);
+
+    delete pkg['mikro-orm'].configPaths;
+  });
+
+  test('fail to get ORM configuration [from package.json] because of duplicate config name', async () => {
+    pathExistsMock.mockReturnValue(true);
+    pkg['mikro-orm'].configPaths = [`${Utils.normalizePath(process.cwd())}/mikro-orm-array-invalid.config.js`];
+
+    await expect(async () => {
+      return await CLIHelper.getConfiguration();
+    }).rejects.toThrowError(/^MikroORM config 'default' is not unique within the array exported/);
+
+    delete pkg['mikro-orm'].configPaths;
+  });
+
+  test('gets ORM configuration [from package.json] by contextName from array with factories', async () => {
+    pathExistsMock.mockReturnValue(true);
+    pkg['mikro-orm'].configPaths = [`${Utils.normalizePath(process.cwd())}/mikro-orm-factory-array.config.js`];
+
+    const conf = await CLIHelper.getConfiguration();
+    expect(conf).toBeInstanceOf(Configuration);
+    expect(conf.get('dbName')).toBe('foo_bar');
+    expect(conf.get('user')).toBeUndefined();
+    expect(conf.get('entities')).toEqual(['tests/foo']);
+
+    const conf2 = await CLIHelper.getConfiguration('example1');
+    expect(conf2).toBeInstanceOf(Configuration);
+    expect(conf2.get('dbName')).toBe('tenant_example1');
+    expect(conf2.get('user')).toBeUndefined();
+    expect(conf2.get('entities')).toEqual(['tests/foo']);
+
+    const conf3 = await CLIHelper.getConfiguration('boom');
+    expect(conf3).toBeInstanceOf(Configuration);
+    expect(conf3.get('dbName')).toBe('tenant_boom');
+    expect(conf3.get('user')).toBe('user2');
+    expect(conf3.get('entities')).toEqual(['tests/foo']);
+
+    await expect(async () => {
+      return await CLIHelper.getConfiguration('unknown');
+    }).rejects.toThrowError(/^MikroORM config 'unknown' was not found within the config file/);
+
+    delete pkg['mikro-orm'].configPaths;
+  });
+
+  test('fail to get ORM configuration [from package.json] because of invalid default export', async () => {
+    pathExistsMock.mockReturnValue(true);
+    pkg['mikro-orm'].configPaths = [`${Utils.normalizePath(process.cwd())}/mikro-orm-invalid.config.js`];
+
+    await expect(async () => {
+      return await CLIHelper.getConfiguration();
+    }).rejects.toThrowError(/^MikroORM config 'default' was not what the default export from/);
+
+    delete pkg['mikro-orm'].configPaths;
+  });
+
   test('gets ORM configuration [from package.json] with rejected promise', async () => {
     expect.assertions(1);
     pathExistsMock.mockReturnValue(true);
@@ -299,7 +430,7 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
       return str.includes('/mikro-orm.config.js') && !str.includes('/src/mikro-orm.config.js');
     });
     delete pkg['mikro-orm'].useTsNode;
-    const orm = await CLIHelper.getORM(false);
+    const orm = await CLIHelper.getORM(undefined, undefined, { discovery: { warnWhenNoEntities: false } });
     expect(orm).toBeInstanceOf(MikroORM);
     // defaults to true when used via CLI since v6.3
     expect(orm.config.get('tsNode')).toBe(true);
@@ -316,7 +447,7 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
     });
     pkg['mikro-orm'].useTsNode = true;
     await expect(CLIHelper.getORM()).rejects.toThrow('No entities were discovered');
-    const orm = await CLIHelper.getORM(false);
+    const orm = await CLIHelper.getORM(undefined, undefined, { discovery: { warnWhenNoEntities: false } });
     expect(orm).toBeInstanceOf(MikroORM);
     expect(orm.config.get('tsNode')).toBe(true);
     await orm.close(true);
@@ -398,12 +529,12 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
   });
 
   test('getDriverDependencies', async () => {
-    await expect(CLIHelper.getDriverDependencies()).resolves.toEqual([]);
+    expect(CLIHelper.getDriverDependencies(new Configuration({}, false))).toEqual([]);
     pathExistsMock.mockImplementation(async path => {
       const str = path as string;
       return str.includes('/mikro-orm.config.js') && !str.includes('/src/mikro-orm.config.js');
     });
-    await expect(CLIHelper.getDriverDependencies()).resolves.toEqual(['mongodb']);
+    expect(CLIHelper.getDriverDependencies(await ConfigurationLoader.getConfiguration('default', ConfigurationLoader.getConfigPaths()))).toEqual(['mongodb']);
   });
 
   test('dumpDependencies', async () => {
@@ -420,16 +551,12 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
 
     logSpy.mock.calls.length = 0;
     pathExistsMock.mockReturnValue(true);
-    const getDriverDependencies = CLIHelper.getDriverDependencies;
-    CLIHelper.getDriverDependencies = async () => ['mongodb'];
     await CLIHelper.dumpDependencies();
     expect(logSpy.mock.calls[0][0]).toBe(' - dependencies:');
     expect(logSpy.mock.calls[1][0]).toMatch(/ {3}- mikro-orm [.\w]+/);
     expect(logSpy.mock.calls[2][0]).toMatch(/ {3}- node [.\w]+/);
-    expect(logSpy.mock.calls[3][0]).toMatch(/ {3}- mongodb [.\w]+/);
-    expect(logSpy.mock.calls[4][0]).toMatch(/ {3}- typescript [.\w]+/);
-    expect(logSpy.mock.calls[5][0]).toBe(' - package.json found');
-    CLIHelper.getDriverDependencies = getDriverDependencies;
+    expect(logSpy.mock.calls[3][0]).toMatch(/ {3}- typescript [.\w]+/);
+    expect(logSpy.mock.calls[4][0]).toBe(' - package.json found');
     logSpy.mockRestore();
   });
 
@@ -441,7 +568,7 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
     pkg['mikro-orm'] = undefined;
 
     expect(ConfigurationLoader.getSettings()).toEqual({});
-    await expect(ConfigurationLoader.getConfiguration()).resolves.toBeInstanceOf(Configuration);
+    await expect(ConfigurationLoader.getConfiguration('default', ConfigurationLoader.getConfigPaths())).resolves.toBeInstanceOf(Configuration);
 
     process.env.MIKRO_ORM_CLI_USE_TS_NODE = '1';
     process.env.MIKRO_ORM_CLI_TS_CONFIG_PATH = 'foo/tsconfig.json';
@@ -502,21 +629,15 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
   });
 
   test('isDBConnected', async () => {
-    await expect(CLIHelper.isDBConnected()).resolves.toEqual(false);
+    await expect(CLIHelper.isDBConnected(new Configuration({}, false))).resolves.toEqual(false);
     pathExistsMock.mockImplementation(async path => {
       const str = path as string;
       return str.includes('/mikro-orm.config.js') && !str.includes('/src/mikro-orm.config.js');
     });
-    await expect(CLIHelper.isDBConnected()).resolves.toEqual(true);
+    await expect(CLIHelper.isDBConnected(await CLIHelper.getConfiguration())).resolves.toEqual(true);
   });
 
   test('getConfigPaths', async () => {
-    (global as any).process.argv = ['node', 'start.js', '--config', './override1/orm-config.ts'];
-    expect(CLIHelper.getConfigPaths()).toEqual(['./override1/orm-config.ts']);
-    (global as any).process.argv = ['node', 'start.js', '--config=./override2/orm-config.ts'];
-    expect(CLIHelper.getConfigPaths()).toEqual(['./override2/orm-config.ts']);
-    (global as any).process.argv = ['npx', 'mikro-orm', 'debug', '--config', './override3/orm-config.ts'];
-    expect(CLIHelper.getConfigPaths()).toEqual(['./override3/orm-config.ts']);
     (global as any).process.argv = ['node', 'start.js'];
     (global as any).process.env.MIKRO_ORM_CLI_CONFIG = './override/orm-config.ts';
     expect(CLIHelper.getConfigPaths()).toEqual(['./override/orm-config.ts', './src/mikro-orm.config.ts', './mikro-orm.config.ts', './src/mikro-orm.config.js', './mikro-orm.config.js']);
@@ -544,5 +665,47 @@ Maybe you want to check, or regenerate your yarn.lock or package-lock.json file?
 
     pathExistsMock.mockReturnValue(false);
     expect(CLIHelper.getConfigPaths()).toEqual(['./src/mikro-orm.config.ts', './mikro-orm.config.ts', './src/mikro-orm.config.js', './mikro-orm.config.js']);
+  });
+
+  test('getConfigPathFromArgs', async () => {
+    (global as any).process.argv = ['node', 'start.js', '--config', './override1/orm-config.ts'];
+    expect(ConfigurationLoader.configPathsFromArg()).toEqual(['./override1/orm-config.ts']);
+    const messages: string[] = [];
+    const configMock = jest.spyOn(ConfigurationLoader, 'getConfiguration')
+      .mockReturnValue(Promise.resolve(new Configuration(defineConfig({
+        dbName: 'test',
+        connect: false,
+        discovery: {
+          warnWhenNoEntities: false,
+        },
+        debug: true,
+        logger: message => {
+          messages.push(message);
+        },
+      }))));
+    await MikroORM.init();
+    expect(messages[0]).toBe('[deprecated] (D0001) Path for config file was inferred from the command line arguments. Instead, you should set the MIKRO_ORM_CLI_CONFIG environment variable to specify the path, or if you really must use the command line arguments, import the config manually based on them, and pass it to init.');
+    messages.length = 0;
+
+    (global as any).process.argv = ['node', 'start.js', '--config=./override2/orm-config.ts'];
+    expect(ConfigurationLoader.configPathsFromArg()).toEqual(['./override2/orm-config.ts']);
+    await MikroORM.init();
+    expect(messages[0]).toBe('[deprecated] (D0001) Path for config file was inferred from the command line arguments. Instead, you should set the MIKRO_ORM_CLI_CONFIG environment variable to specify the path, or if you really must use the command line arguments, import the config manually based on them, and pass it to init.');
+    messages.length = 0;
+
+    (global as any).process.argv = ['npm', 'start', '--config', './override3/orm-config.ts'];
+    expect(ConfigurationLoader.configPathsFromArg()).toEqual(['./override3/orm-config.ts']);
+    await MikroORM.init();
+    expect(messages[0]).toBe('[deprecated] (D0001) Path for config file was inferred from the command line arguments. Instead, you should set the MIKRO_ORM_CLI_CONFIG environment variable to specify the path, or if you really must use the command line arguments, import the config manually based on them, and pass it to init.');
+    messages.length = 0;
+    configMock.mockRestore();
+
+    pathExistsMock.mockImplementation(path => (path as string).endsWith('/mikro-orm-factory.config.js'));
+    (global as any).process.argv = ['node', 'start.js', '--config=./mikro-orm-factory.config.js'];
+    expect(await ConfigurationLoader.getConfiguration(true)).toBeInstanceOf(Configuration);
+    expect(loggerMessages).toStrictEqual(['[deprecated] (D0001) Path for config file was inferred from the command line arguments. Instead, you should set the MIKRO_ORM_CLI_CONFIG environment variable to specify the path, or if you really must use the command line arguments, import the config manually based on them, and pass it to init.']);
+
+    (global as any).process.argv = ['node', 'start.js'];
+    expect(await ConfigurationLoader.getConfiguration(false)).toBeInstanceOf(Configuration);
   });
 });

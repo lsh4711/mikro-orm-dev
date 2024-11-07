@@ -20,15 +20,22 @@ export class DebugCommand implements BaseCommand {
       CLIHelper.dump(' - ts-node ' + colors.green('enabled'));
     }
 
-    const configPaths = CLIHelper.getConfigPaths();
+    const configPaths = args.config ?? CLIHelper.getConfigPaths();
     CLIHelper.dump(' - searched config paths:');
     await DebugCommand.checkPaths(configPaths, 'yellow');
+    CLIHelper.dump(` - searched for config name: ${colors.green(args.contextName)}`);
 
     try {
-      const config = await CLIHelper.getConfiguration();
+      const config = await CLIHelper.getConfiguration(args.contextName, configPaths);
       CLIHelper.dump(` - configuration ${colors.green('found')}`);
+      const drivers = CLIHelper.getDriverDependencies(config);
 
-      const isConnected = await CLIHelper.isDBConnected(true);
+      CLIHelper.dump(' - driver dependencies:');
+      for (const driver of drivers) {
+        CLIHelper.dump(`   - ${driver} ${await CLIHelper.getModuleVersion(driver)}`);
+      }
+
+      const isConnected = await CLIHelper.isDBConnected(config, true);
 
       if (isConnected === true) {
         CLIHelper.dump(` - ${colors.green('database connection successful')}`);
@@ -36,10 +43,11 @@ export class DebugCommand implements BaseCommand {
         CLIHelper.dump(` - ${colors.yellow(`database connection failed (${isConnected})`)}`);
       }
 
-      const tsNode = config.get('tsNode');
-      if ([true, false].includes(tsNode as boolean)) {
-        const warning = tsNode ? ' (this value should be set to `false` when running compiled code!)' : '';
-        CLIHelper.dump(` - \`tsNode\` flag explicitly set to ${tsNode}, will use \`entities${tsNode ? 'Ts' : ''}\` array${warning}`);
+      const preferTs = config.get('preferTs');
+
+      if ([true, false].includes(preferTs as boolean)) {
+        const warning = preferTs ? ' (this value should be set to `false` when running compiled code!)' : '';
+        CLIHelper.dump(` - \`preferTs\` flag explicitly set to ${preferTs}, will use \`entities${preferTs ? 'Ts' : ''}\` array${warning}`);
       }
 
       const entities = config.get('entities', []);
@@ -47,7 +55,7 @@ export class DebugCommand implements BaseCommand {
       if (entities.length > 0) {
         const refs = entities.filter(p => !Utils.isString(p));
         const paths = entities.filter(p => Utils.isString(p));
-        const will = !config.get('tsNode') ? 'will' : 'could';
+        const will = !config.get('preferTs') ? 'will' : 'could';
         CLIHelper.dump(` - ${will} use \`entities\` array (contains ${refs.length} references and ${paths.length} paths)`);
 
         if (paths.length > 0) {
@@ -61,7 +69,7 @@ export class DebugCommand implements BaseCommand {
         const refs = entitiesTs.filter(p => !Utils.isString(p));
         const paths = entitiesTs.filter(p => Utils.isString(p));
         /* istanbul ignore next */
-        const will = config.get('tsNode') ? 'will' : 'could';
+        const will = config.get('preferTs') ? 'will' : 'could';
         CLIHelper.dump(` - ${will} use \`entitiesTs\` array (contains ${refs.length} references and ${paths.length} paths)`);
 
         /* istanbul ignore else */

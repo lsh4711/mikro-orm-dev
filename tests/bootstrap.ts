@@ -66,7 +66,7 @@ export async function initORMMongo(replicaSet = false, overrideOptions: Partial<
 
   const orm = await MikroORM.init({
     entities: ['entities'],
-    tsNode: false,
+    preferTs: false,
     clientUrl,
     baseDir: BASE_DIR,
     logger: i => i,
@@ -158,6 +158,7 @@ export async function initORMPostgreSql(loadStrategy = LoadStrategy.SELECT_IN, e
     loadStrategy,
     subscribers: [Test2Subscriber],
     extensions: [Migrator, SeedManager, EntityGenerator],
+    onQuery: sql => `/* foo */ ${sql}`,
   });
 
   await orm.schema.ensureDatabase();

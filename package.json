@@ -106,8 +106,8 @@
     "@side/jest-runtime": "^1.1.0",
     "@types/esprima": "4.0.6",
     "@types/fs-extra": "11.0.4",
-    "@types/jest": "29.5.13",
-    "@types/node": "22.7.5",
+    "@types/jest": "29.5.14",
+    "@types/node": "22.9.0",
     "@types/pg": "8.11.10",
     "@types/semver": "^7.5.8",
     "@types/sqlstring": "2.3.2",
@@ -126,15 +126,15 @@
     "guid-typescript": "1.0.9",
     "husky": "9.1.6",
     "jest": "29.7.0",
-    "lerna": "8.1.8",
+    "lerna": "8.1.9",
     "lint-staged": "15.2.10",
-    "mongodb": "6.9.0",
+    "mongodb": "6.10.0",
     "mongodb-memory-server-core": "10.1.2",
     "rimraf": "6.0.1",
     "ts-jest": "29.2.0",
     "ts-node": "10.9.2",
     "typescript": "5.6.3",
-    "uuid": "10.0.0"
+    "uuid": "11.0.2"
   },
-  "packageManager": "yarn@4.5.0"
+  "packageManager": "yarn@4.5.1"
 }
